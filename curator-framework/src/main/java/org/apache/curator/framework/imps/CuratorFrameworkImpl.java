@@ -594,12 +594,20 @@ public class CuratorFrameworkImpl implements CuratorFramework
     {
         return useContainerParentsIfAvailable;
     }
-
-    <DATA_TYPE> void processBackgroundOperation(OperationAndData<DATA_TYPE> operationAndData, CuratorEvent event)
+    
+    <DATA_TYPE> void processBackgroundOperation(OperationAndData<DATA_TYPE> operationAndData, CuratorEvent event) {
+        processBackgroundOperation(operationAndData, event, false);
+    }
+    
+    <DATA_TYPE> void processBackgroundOperation(OperationAndData<DATA_TYPE> operationAndData, CuratorEvent event, boolean forceToBackground)
     {
         boolean isInitialExecution = (event == null);
         if (isInitialExecution) {
-            queueOperation(operationAndData);
+            if(forceToBackground) {
+                queueOperation(operationAndData);
+            } else {
+                performBackgroundOperation(operationAndData);
+            }
             return;
         }
         

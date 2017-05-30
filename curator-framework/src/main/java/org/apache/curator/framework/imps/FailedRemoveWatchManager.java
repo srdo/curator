@@ -34,11 +34,11 @@ class FailedRemoveWatchManager extends FailedOperationManager<FailedRemoveWatchM
     {
         if(details.watcher == null)
         {
-            client.watches().removeAll().guaranteed().inBackground().forPath(details.path);
+            client.watches().removeAll().guaranteedForceToBackground().inBackground().forPath(details.path);
         }
         else
         {
-            client.watches().remove(details.watcher).guaranteed().inBackground().forPath(details.path);
+            client.watches().remove(details.watcher).guaranteedForceToBackground().inBackground().forPath(details.path);
         }
     }
     

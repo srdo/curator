@@ -29,4 +29,15 @@ public interface Guaranteeable<T>
      * @return this
      */
     public T guaranteed();
+    
+    /**
+     * Requires any retries of the guaranteed operation to happen in the background thread. This solves an 
+     * edge case where a guaranteed operation may provoke a stack overflow exception if the retries happen
+     * in the foreground. Users will generally not need to call this manually.
+     * 
+     * @see #guaranteed() 
+     * 
+     * @return this
+     */
+    public T guaranteedForceToBackground();
 }

@@ -18,6 +18,8 @@
  */
 package org.apache.curator.framework.imps;
 
+import static org.mockito.Mockito.mock;
+
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.framework.api.BackgroundCallback;
@@ -36,7 +38,15 @@ import org.testng.annotations.Test;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import org.apache.curator.retry.RetryNTimes;
+import org.apache.curator.utils.DefaultZookeeperFactory;
+import org.apache.curator.utils.ZookeeperFactory;
+import org.apache.zookeeper.WatchedEvent;
+import org.apache.zookeeper.Watcher;
+import org.apache.zookeeper.ZooKeeper;
 
 public class TestFailedDeleteManager extends BaseClassForTests
 {
@@ -360,5 +370,107 @@ public class TestFailedDeleteManager extends BaseClassForTests
         {
             client.close();
         }        
-    }    
+    }
+
+    @Test
+    public void     testFailedOperationsAreForcedToTheBackgroundThread() throws Exception
+    {
+        /**
+         * The failed delete manager must force retries to happen in the background thread to solve an edge case where
+         * the guaranteed delete is retried in the foreground repeatedly, causing a stack overflow. CURATOR-106.
+         */
+        final String PATH = "/one/two/three";
+
+        /**
+         * The conditions for the stack overflow are at the time of writing:
+         * Retries must be disabled 
+         *   - If retries are enabled, the retries are put on the background thread
+         * The delete must be guaranteed 
+         *   - If the delete is not guaranteed, the FailedDeleteManager is not involved
+         * The delete must fail, but the client must not be aware that it's disconnected from the Zookeeper cluster
+         *   - If the client knows it's disconnected, it will put the delete on the background thread
+         */
+        final InterceptingWatcher wrappedWatcher = new InterceptingWatcher();
+        
+        final ZookeeperFactory wrappedFactory = new DefaultZookeeperFactory();
+        ZookeeperFactory factory = new ZookeeperFactory() {
+            @Override
+            public ZooKeeper newZooKeeper(String connectString, int sessionTimeout, Watcher watcher, boolean canBeReadOnly) throws Exception {
+                wrappedWatcher.wrappedWatcher.set(watcher);
+                return wrappedFactory.newZooKeeper(connectString, sessionTimeout, wrappedWatcher, canBeReadOnly);
+            }
+        };
+        
+        Timing                          timing = new Timing();
+        CuratorFrameworkFactory.Builder builder = CuratorFrameworkFactory.builder();
+        builder.connectString(server.getConnectString()).retryPolicy(new RetryNTimes(0, 0)).connectionTimeoutMs(timing.connection()).sessionTimeoutMs(timing.session()).zookeeperFactory(factory);
+        CuratorFrameworkImpl            client = new CuratorFrameworkImpl(builder);
+        client.start();
+        final CountDownLatch connectionLossLatch = new CountDownLatch(1);
+        client.getConnectionStateListenable().addListener(new ConnectionStateListener() {
+            @Override
+            public void stateChanged(CuratorFramework client, ConnectionState newState) {
+                if(newState == ConnectionState.SUSPENDED) {
+                    connectionLossLatch.countDown();
+                }
+            }
+        });
+        try
+        {
+            client.create().creatingParentsIfNeeded().forPath(PATH);
+            Assert.assertNotNull(client.checkExists().forPath(PATH));
+            
+            server.stop(); //Lose connection to Zookeeper
+            timing.awaitLatch(connectionLossLatch);
+            wrappedWatcher.forwardRealEvents.set(false);
+            //Make the client think it's connected
+            //This emulates cases where the client has lost connection, but isn't aware yet
+            wrappedWatcher.send(new WatchedEvent(Watcher.Event.EventType.None, Watcher.Event.KeeperState.SyncConnected, "/"));
+            
+            final CountDownLatch backgroundDeleteLatch = new CountDownLatch(1);
+            client.debugListener = new CuratorFrameworkImpl.DebugBackgroundListener() {
+                @Override
+                public void listen(OperationAndData<?> data) {
+                    if(data.getOperation().getClass().getName().contains(DeleteBuilderImpl.class.getSimpleName())) {
+                        backgroundDeleteLatch.countDown();
+                    }
+                }
+            };
+            
+            try
+            {
+                client.delete().guaranteed().forPath(PATH);
+                Assert.fail();
+            }
+            catch ( KeeperException.ConnectionLossException e )
+            {
+                // expected
+            }
+
+            server.restart();
+            
+            //It is important that the failed delete call happens on the background thread, not in the foreground
+            Assert.assertTrue(timing.awaitLatch(backgroundDeleteLatch));
+        }
+        finally
+        {
+            CloseableUtils.closeQuietly(client);
+        }
+    }
+    
+    private static class InterceptingWatcher implements Watcher {
+        public AtomicReference<Watcher> wrappedWatcher = new AtomicReference<>();
+        public AtomicBoolean forwardRealEvents = new AtomicBoolean(true);
+
+        @Override
+        public void process(WatchedEvent event) {
+            if(forwardRealEvents.get()) {
+                wrappedWatcher.get().process(event);
+            }
+        }
+        
+        public void send(WatchedEvent event) {
+            wrappedWatcher.get().process(event);
+        }
+    }
 }

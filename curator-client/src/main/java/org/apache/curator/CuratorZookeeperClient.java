@@ -164,7 +164,7 @@ public class CuratorZookeeperClient implements Closeable
     }
 
     /**
-     * Returns true if the client is current connected
+     * Returns true if the client is currently connected
      *
      * @return true/false
      */

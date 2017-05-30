@@ -38,6 +38,7 @@ public class RemoveWatchesBuilderImpl implements RemoveWatchesBuilder, RemoveWat
     private CuratorWatcher curatorWatcher;
     private WatcherType watcherType;
     private boolean guaranteed;
+    private boolean guaranteedInBackground;
     private boolean local;
     private boolean quietly;    
     private Backgrounding backgrounding;
@@ -49,6 +50,7 @@ public class RemoveWatchesBuilderImpl implements RemoveWatchesBuilder, RemoveWat
         this.curatorWatcher = null;
         this.watcherType = WatcherType.Any;
         this.guaranteed = false;
+        this.guaranteedInBackground = false;
         this.local = false;
         this.quietly = false;
         this.backgrounding = new Backgrounding();
@@ -61,6 +63,7 @@ public class RemoveWatchesBuilderImpl implements RemoveWatchesBuilder, RemoveWat
         this.curatorWatcher = curatorWatcher;
         this.watcherType = watcherType;
         this.guaranteed = guaranteed;
+        this.guaranteedInBackground = false;
         this.local = local;
         this.quietly = quietly;
         this.backgrounding = backgrounding;
@@ -173,6 +176,13 @@ public class RemoveWatchesBuilderImpl implements RemoveWatchesBuilder, RemoveWat
     }    
 
     @Override
+    public BackgroundPathableQuietlyable<Void> guaranteedForceToBackground() {
+        guaranteed = true;
+        guaranteedInBackground = true;
+        return this;
+    }
+
+    @Override
     public BackgroundPathableQuietlyable<Void> locally()
     {
         local = true;
@@ -221,7 +231,7 @@ public class RemoveWatchesBuilderImpl implements RemoveWatchesBuilder, RemoveWat
         }
         
         client.processBackgroundOperation(new OperationAndData<String>(this, path, backgrounding.getCallback(),
-                                                                       errorCallback, backgrounding.getContext(), !local), null);
+                                                                       errorCallback, backgrounding.getContext(), !local), null, guaranteedInBackground);
     }
     
     private void pathInForeground(final String path) throws Exception

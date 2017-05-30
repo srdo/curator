@@ -38,6 +38,7 @@ public class DeleteBuilderImpl implements DeleteBuilder, BackgroundOperation<Str
     private Backgrounding backgrounding;
     private boolean deletingChildrenIfNeeded;
     private boolean guaranteed;
+    private boolean guaranteedInBackground;
     private boolean quietly;
 
     DeleteBuilderImpl(CuratorFrameworkImpl client)
@@ -47,6 +48,7 @@ public class DeleteBuilderImpl implements DeleteBuilder, BackgroundOperation<Str
         backgrounding = new Backgrounding();
         deletingChildrenIfNeeded = false;
         guaranteed = false;
+        guaranteedInBackground = false;
         quietly = false;
     }
 
@@ -57,6 +59,7 @@ public class DeleteBuilderImpl implements DeleteBuilder, BackgroundOperation<Str
         this.backgrounding = backgrounding;
         this.deletingChildrenIfNeeded = deletingChildrenIfNeeded;
         this.guaranteed = guaranteed;
+        this.guaranteedInBackground = false;
         this.quietly = quietly;
     }
 
@@ -92,6 +95,13 @@ public class DeleteBuilderImpl implements DeleteBuilder, BackgroundOperation<Str
     public ChildrenDeletable guaranteed()
     {
         guaranteed = true;
+        return this;
+    }
+
+    @Override
+    public ChildrenDeletable guaranteedForceToBackground() {
+        guaranteed = true;
+        guaranteedInBackground = true;
         return this;
     }
 
@@ -242,7 +252,7 @@ public class DeleteBuilderImpl implements DeleteBuilder, BackgroundOperation<Str
                     }
                 };
             }
-            client.processBackgroundOperation(new OperationAndData<String>(this, path, backgrounding.getCallback(), errorCallback, backgrounding.getContext(), null), null);
+            client.processBackgroundOperation(new OperationAndData<String>(this, path, backgrounding.getCallback(), errorCallback, backgrounding.getContext(), null), null, guaranteedInBackground);
         }
         else
         {
